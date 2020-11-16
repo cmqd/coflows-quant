@@ -297,7 +297,7 @@ namespace CoFlows.Server.Quant
                 {
                     var pkg = Code.ProcessPackageFile(CoFlows.Server.Program.workflow_name, true);
                     Code.ProcessPackageJSON(pkg);
-                    SetDefaultWorkflows(new string[]{ pkg.ID }, false, config["Jupter"] != null && config["Jupter"].ToString().ToLower() == "true");
+                    SetDefaultWorkflows(new string[]{ pkg.ID }, false, config["Jupyter"] != null && config["Jupyter"].ToString().ToLower() == "true");
                     Console.WriteLine(pkg.Name + " started");
 
                     var _g = Group.FindGroup(pkg.ID);
@@ -318,7 +318,7 @@ namespace CoFlows.Server.Quant
                     var workspace_ids = QuantApp.Kernel.M.Base("--CoFlows--Workflows")[xe => true];
                     foreach(var wsp in workspace_ids)
                     {
-                        SetDefaultWorkflows(new string[]{ wsp.ToString() }, true, config["Jupter"] != null && config["Jupter"].ToString().ToLower() == "true");
+                        SetDefaultWorkflows(new string[]{ wsp.ToString() }, true, config["Jupyter"] != null && config["Jupyter"].ToString().ToLower() == "true");
                         Console.WriteLine(wsp + " started");
                     }
                 }
