@@ -12,6 +12,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DefineConstants>NETSTANDARD;MONO_LINUX;TRACE;DEBUG;PYTHON3;PYTHON37;UCS4;PYTHON_WITH_PYMALLOC</DefineConstants>
     <StartupObject>CoFlows.Server.Quant.Program</StartupObject>
+
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup> 
 
   <ItemGroup>
