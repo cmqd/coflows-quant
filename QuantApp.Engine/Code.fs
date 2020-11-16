@@ -2889,6 +2889,7 @@ module Code =
                         fun entry -> 
                             { Name = entry.Substring(entry.IndexOf("/Files") + "/Files".Length + 1); Content = entry.Substring(entry.IndexOf("/Files") + 1)}
                     )
+                    
                 else
                     Seq.empty
 
