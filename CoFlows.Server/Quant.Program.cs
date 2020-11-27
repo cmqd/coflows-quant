@@ -297,6 +297,34 @@ namespace CoFlows.Server.Quant
                 {
                     var pkg = Code.ProcessPackageFile(CoFlows.Server.Program.workflow_name, true);
                     Code.ProcessPackageJSON(pkg);
+                    var files = QuantApp.Kernel.M.Base(pkg.ID + "--Files")[x => true];
+                    foreach(var file in files)
+                    {
+                        var fileName = QuantApp.Kernel.M.V<string>(file, "Name");
+
+                        var fileContent = QuantApp.Kernel.M.V<string>(file, "Content");
+                        try
+                        {
+                            var fileData = System.Convert.FromBase64String(fileContent);
+                            File.WriteAllBytes("mnt/Files/" + fileName, fileData);
+                        }
+                        catch(Exception e)
+                        {
+                            Console.WriteLine("ERROR FILE: " + fileName);
+                            Console.WriteLine(e);
+                        }
+                    }
+
+                    var bins = QuantApp.Kernel.M.Base(pkg.ID + "--Bins")[x => true];
+                    foreach(var bin in bins)
+                    {
+                        var fileName = QuantApp.Kernel.M.V<string>(bin, "Name");
+                        var fileContent = QuantApp.Kernel.M.V<string>(bin, "Content");
+
+                        var fileData = System.Convert.FromBase64String(fileContent);
+                        File.WriteAllBytes("mnt/Bins/" + fileName, fileData);
+                    }
+
                     SetDefaultWorkflows(new string[]{ pkg.ID }, false, config["Jupyter"] != null && config["Jupyter"].ToString().ToLower() == "true");
                     Console.WriteLine(pkg.Name + " started");
 
@@ -318,6 +346,37 @@ namespace CoFlows.Server.Quant
                     var workspace_ids = QuantApp.Kernel.M.Base("--CoFlows--Workflows")[xe => true];
                     foreach(var wsp in workspace_ids)
                     {
+                        var files = QuantApp.Kernel.M.Base(wsp + "--Files")[x => true];
+                        foreach(var file in files)
+                        {
+                            var fileName = QuantApp.Kernel.M.V<string>(file, "Name");
+
+                            var fileContent = QuantApp.Kernel.M.V<string>(file, "Content");
+                            try
+                            {
+                                var fileData = System.Convert.FromBase64String(fileContent);
+                                (new System.IO.FileInfo("mnt/Files/" + fileName)).Directory.Create();
+                                File.WriteAllBytes("mnt/Files/" + fileName, fileData);
+                            }
+                            catch(Exception e)
+                            {
+                                Console.WriteLine("ERROR FILE: " + fileName);
+                                Console.WriteLine(e);
+                                Console.WriteLine(fileContent.Substring(Math.Min(250, fileContent.Length)));
+                            }
+                        }
+
+                        var bins = QuantApp.Kernel.M.Base(wsp + "--Bins")[x => true];
+                        foreach(var bin in bins)
+                        {
+                            var fileName = QuantApp.Kernel.M.V<string>(bin, "Name");
+                            var fileContent = QuantApp.Kernel.M.V<string>(bin, "Content");
+
+                            var fileData = System.Convert.FromBase64String(fileContent);
+                            (new System.IO.FileInfo("mnt/Files/" + fileName)).Directory.Create();
+                            File.WriteAllBytes("mnt/Bins/" + fileName, fileData);
+                        }
+
                         SetDefaultWorkflows(new string[]{ wsp.ToString() }, true, config["Jupyter"] != null && config["Jupyter"].ToString().ToLower() == "true");
                         Console.WriteLine(wsp + " started");
                     }
@@ -869,6 +928,10 @@ namespace CoFlows.Server.Quant
                     Directory.CreateDirectory("/app/mnt/Queries/");
                     File.WriteAllText("/app/mnt/Queries/" + name + ".py", query);
 
+                    string sourceDirectory = @"scripts/Files";
+                    string targetDirectory = @"/app/mnt/Files" + name;
+                    CoFlows.Server.Program.Copy(sourceDirectory, targetDirectory, name);
+
                     var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
                     var res = Code.BuildRegisterPackage(pkg);
                     if(string.IsNullOrEmpty(res))
@@ -1225,6 +1288,15 @@ namespace CoFlows.Server.Quant
             {         
                 if(KernelConnectString.StartsWith("Server="))
                 {
+                    var _KernelDataAdapter = new MSSQLDataSetAdapter();
+                    _KernelDataAdapter.ConnectString = KernelConnectString;
+                    _KernelDataAdapter.CreateDB(KernelConnectString, new List<Tuple<string, string>> {
+                        Tuple.Create("sql/create.sql", File.ReadAllText(@"sql/create.sql")),
+                        Tuple.Create("sql/quant.sql", File.ReadAllText(@"sql/quant.sql")),
+                        Tuple.Create("sql/calendars.sql", File.ReadAllText(@"sql/calendars.sql")),
+                        Tuple.Create("sql/fic.sql", File.ReadAllText(@"sql/fic.sql"))
+                    });
+
                     MSSQLDataSetAdapter KernelDataAdapter = new MSSQLDataSetAdapter();
                     KernelDataAdapter.ConnectString = KernelConnectString;
                     QuantApp.Kernel.Database.DB.Add("Kernel", KernelDataAdapter);
@@ -1233,12 +1305,13 @@ namespace CoFlows.Server.Quant
                 {
                     var _KernelDataAdapter = new PostgresDataSetAdapter();
                     _KernelDataAdapter.ConnectString = KernelConnectString;
-                    _KernelDataAdapter.CreateDB(KernelConnectString, new List<string> {
-                        File.ReadAllText(@"sql/create.sql").Replace("DateTime", "timestamp"),
-                        File.ReadAllText(@"sql/quant.sql").Replace("DateTime", "timestamp"),
-                        File.ReadAllText(@"sql/calendars.sql"),
-                        File.ReadAllText(@"sql/fic.sql")
+                    _KernelDataAdapter.CreateDB(KernelConnectString, new List<Tuple<string, string>> {
+                        Tuple.Create("sql/create.sql", File.ReadAllText(@"sql/create.sql")),
+                        Tuple.Create("sql/quant.sql", File.ReadAllText(@"sql/quant.sql")),
+                        Tuple.Create("sql/calendars.sql", File.ReadAllText(@"sql/calendars.sql")),
+                        Tuple.Create("sql/fic.sql", File.ReadAllText(@"sql/fic.sql"))
                     });
+
                     var KernelDataAdapter = new PostgresDataSetAdapter();
                     KernelDataAdapter.ConnectString = KernelConnectString;
                     QuantApp.Kernel.Database.DB.Add("Kernel", KernelDataAdapter);
