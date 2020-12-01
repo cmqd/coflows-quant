@@ -67,7 +67,8 @@ namespace CoFlows.Server.Quant
             if(string.IsNullOrEmpty(config_file))
                 config_file = "coflows_config.json";
 
-            JObject config = string.IsNullOrEmpty(config_env) ? (JObject)JToken.ReadFrom(new JsonTextReader(File.OpenText(@"mnt/" + config_file))) : (JObject)JToken.Parse(config_env);
+            CoFlows.Server.Program.config = string.IsNullOrEmpty(config_env) ? (JObject)JToken.ReadFrom(new JsonTextReader(File.OpenText(@"mnt/" + config_file))) : (JObject)JToken.Parse(config_env);
+            var config = CoFlows.Server.Program.config;
 
             CoFlows.Server.Program.workflow_name = config["Workflow"].ToString();
             CoFlows.Server.Program.hostName = config["Server"]["Host"].ToString();
@@ -85,6 +86,7 @@ namespace CoFlows.Server.Quant
 
             CoFlows.Server.Program.useJupyter = config["Jupyter"].ToString().ToLower() == "true";
 
+            //Jupyter Lab
             if(args != null && args.Length > 0 && args[0] == "lab")
             {
                 Connection.Client.Init(CoFlows.Server.Program.hostName, sslFlag);
@@ -121,7 +123,7 @@ namespace CoFlows.Server.Quant
 
                 Console.Write("Starting cloud deployment... ");
 
-                Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name);
+                Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null));
                 var t0 = DateTime.Now;
                 Console.WriteLine("Started: " + t0);
                 var res = Connection.Client.PublishPackage(CoFlows.Server.Program.workflow_name);
@@ -145,7 +147,7 @@ namespace CoFlows.Server.Quant
 
                 Console.Write("CoFlows Cloud build... ");
 
-                Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name);
+                Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null));
                 var t0 = DateTime.Now;
                 Console.WriteLine("Started: " + t0);
                 var res = Connection.Client.BuildPackage(CoFlows.Server.Program.workflow_name);
@@ -173,7 +175,7 @@ namespace CoFlows.Server.Quant
                 var funcName = args.Length > 3 ? args[3] : null;
                 var parameters = args.Length > 4 ? args.Skip(4).ToArray() : null;
 
-                var pkg = Code.ProcessPackageFile(CoFlows.Server.Program.workflow_name);
+                var pkg = Code.ProcessPackageFile(CoFlows.Server.Program.workflow_name, true);
                 Console.WriteLine("Workflow: " + pkg.Name);
 
                 Console.WriteLine("Query ID: " + queryID);
@@ -255,20 +257,32 @@ namespace CoFlows.Server.Quant
                 Console.WriteLine("Result: ");
                 Console.WriteLine(res);
             }
+            //Server
             else if(args != null && args.Length > 0 && args[0] == "server")
             {
                 PythonEngine.BeginAllowThreads();
 
-                if(config["Database"].Children().Count() > 0)
+                var type = config["Database"]["Type"].ToString();
+                if(type.ToLower() == "mssql" || type.ToLower() == "postgres")
                 {
-                    var kernelString = config["Database"]["Kernel"].ToString();
-                    var strategyString = config["Database"]["Strategies"].ToString();
-                    var quantappString = config["Database"]["QuantApp"].ToString();
-                    Databases(kernelString, strategyString, quantappString);
+                    if(config["Database"]["Connection"] == null)
+                    {
+                        var kernelString = config["Database"]["Kernel"].ToString();
+                        var strategyString = config["Database"]["Strategies"].ToString();
+                        var quantappString = config["Database"]["QuantApp"].ToString();
+                        Databases(kernelString, strategyString, quantappString);
+                    }
+                    else
+                    {
+                        var kernelString = config["Database"]["Connection"].ToString();
+                        var strategyString = kernelString;
+                        var quantappString = kernelString;
+                        Databases(kernelString, strategyString, quantappString);
+                    }
                 }
                 else
                 {
-                    var connectionString = config["Database"].ToString();
+                    var connectionString = config["Database"]["Connection"].ToString();
                     Databases(connectionString);
                 }
 
@@ -281,9 +295,37 @@ namespace CoFlows.Server.Quant
 
                 if(string.IsNullOrEmpty(config_env))
                 {
-                    var pkg = Code.ProcessPackageFile(CoFlows.Server.Program.workflow_name);
+                    var pkg = Code.ProcessPackageFile(CoFlows.Server.Program.workflow_name, true);
                     Code.ProcessPackageJSON(pkg);
-                    SetDefaultWorkflows(new string[]{ pkg.ID }, false, config["Jupter"] != null && config["Jupter"].ToString().ToLower() == "true");
+                    var files = QuantApp.Kernel.M.Base(pkg.ID + "--Files")[x => true];
+                    foreach(var file in files)
+                    {
+                        var fileName = QuantApp.Kernel.M.V<string>(file, "Name");
+
+                        var fileContent = QuantApp.Kernel.M.V<string>(file, "Content");
+                        try
+                        {
+                            var fileData = System.Convert.FromBase64String(fileContent);
+                            File.WriteAllBytes("mnt/Files/" + fileName, fileData);
+                        }
+                        catch(Exception e)
+                        {
+                            Console.WriteLine("ERROR FILE: " + fileName);
+                            Console.WriteLine(e);
+                        }
+                    }
+
+                    var bins = QuantApp.Kernel.M.Base(pkg.ID + "--Bins")[x => true];
+                    foreach(var bin in bins)
+                    {
+                        var fileName = QuantApp.Kernel.M.V<string>(bin, "Name");
+                        var fileContent = QuantApp.Kernel.M.V<string>(bin, "Content");
+
+                        var fileData = System.Convert.FromBase64String(fileContent);
+                        File.WriteAllBytes("mnt/Bins/" + fileName, fileData);
+                    }
+
+                    SetDefaultWorkflows(new string[]{ pkg.ID }, false, config["Jupyter"] != null && config["Jupyter"].ToString().ToLower() == "true");
                     Console.WriteLine(pkg.Name + " started");
 
                     var _g = Group.FindGroup(pkg.ID);
@@ -304,30 +346,76 @@ namespace CoFlows.Server.Quant
                     var workspace_ids = QuantApp.Kernel.M.Base("--CoFlows--Workflows")[xe => true];
                     foreach(var wsp in workspace_ids)
                     {
-                        SetDefaultWorkflows(new string[]{ wsp.ToString() }, true, config["Jupter"] != null && config["Jupter"].ToString().ToLower() == "true");
+                        var files = QuantApp.Kernel.M.Base(wsp + "--Files")[x => true];
+                        foreach(var file in files)
+                        {
+                            var fileName = QuantApp.Kernel.M.V<string>(file, "Name");
+
+                            var fileContent = QuantApp.Kernel.M.V<string>(file, "Content");
+                            try
+                            {
+                                var fileData = System.Convert.FromBase64String(fileContent);
+                                (new System.IO.FileInfo("mnt/Files/" + fileName)).Directory.Create();
+                                File.WriteAllBytes("mnt/Files/" + fileName, fileData);
+                            }
+                            catch(Exception e)
+                            {
+                                Console.WriteLine("ERROR FILE: " + fileName);
+                                Console.WriteLine(e);
+                                Console.WriteLine(fileContent.Substring(Math.Min(250, fileContent.Length)));
+                            }
+                        }
+
+                        var bins = QuantApp.Kernel.M.Base(wsp + "--Bins")[x => true];
+                        foreach(var bin in bins)
+                        {
+                            var fileName = QuantApp.Kernel.M.V<string>(bin, "Name");
+                            var fileContent = QuantApp.Kernel.M.V<string>(bin, "Content");
+
+                            var fileData = System.Convert.FromBase64String(fileContent);
+                            (new System.IO.FileInfo("mnt/Files/" + fileName)).Directory.Create();
+                            File.WriteAllBytes("mnt/Bins/" + fileName, fileData);
+                        }
+
+                        SetDefaultWorkflows(new string[]{ wsp.ToString() }, true, config["Jupyter"] != null && config["Jupyter"].ToString().ToLower() == "true");
                         Console.WriteLine(wsp + " started");
                     }
                 }
 
+                Group.FindPermissibleFunction = (Type type, string id) =>
+                {
+                    if (type == typeof(FilePermission) || type == typeof(FilePermission))
+                    {
+                        FilePermission file = FileRepository.File(id);
 
-                /// QuantSpecific START
-                Instrument.TimeSeriesLoadFromDatabaseIntraday = config["Quant"]["Intraday"].ToString().ToLower() == "true";
-                if(Instrument.TimeSeriesLoadFromDatabaseIntraday)
-                    Console.WriteLine("Intraday Timeseries");
-                else
-                    Console.WriteLine("Close Timeseries");
-                Strategy.Executer = true;
-                // Market.Initialize();
+                        if (file != null)
+                            return file;
+                    }
 
-                var saveAll = config["Quant"]["AutoSave"].ToString().ToLower() == "true";
-                if (saveAll) {
-                    var ths = new System.Threading.Thread(x => (AQI.AQILabs.Kernel.Instrument.Factory as AQI.AQILabs.Kernel.Adapters.SQL.Factories.SQLInstrumentFactory).SaveAllLoop(5));
-                    ths.Start();
+                    return null;
+                };
+
+                // QuantSpecific START
+                if(config["Quant"] != null)
+                {
+                    Instrument.TimeSeriesLoadFromDatabaseIntraday = config["Quant"]["Intraday"].ToString().ToLower() == "true";
+                    if(Instrument.TimeSeriesLoadFromDatabaseIntraday)
+                        Console.WriteLine("Intraday Timeseries");
+                    else
+                        Console.WriteLine("Close Timeseries");
+                    Strategy.Executer = true;
+                    // Market.Initialize();
+
+                    var saveAll = config["Quant"]["AutoSave"].ToString().ToLower() == "true";
+                    if (saveAll) {
+                        var ths = new System.Threading.Thread(x => (AQI.AQILabs.Kernel.Instrument.Factory as AQI.AQILabs.Kernel.Adapters.SQL.Factories.SQLInstrumentFactory).SaveAllLoop(5));
+                        ths.Start();
+                    }
+                    else
+                        Console.WriteLine("Not saving timeseries");
                 }
-                else
-                    Console.WriteLine("Not saving timeseries");
-
-                /// QuantSpecific END
+                // QuantSpecific END
+                
                 
                 if(!sslFlag)
                     CoFlows.Server.Program.Init(new string[]{"--urls", "http://*:80"}, new Realtime.WebSocketListner(), typeof(Startup<CoFlows.Server.Realtime.RTDSocketMiddleware>));
@@ -345,27 +433,40 @@ namespace CoFlows.Server.Quant
                 Console.CancelKeyPress += new ConsoleCancelEventHandler(OnExit);
                 _closing.WaitOne();
             }
+            //Local
             else if(args != null && args.Length > 1 && args[0] == "local" && args[1] == "build")
             {
                 PythonEngine.BeginAllowThreads();
 
-                if(config["Database"].Children().Count() > 0)
+                var type = config["Database"]["Type"].ToString();
+                if(type.ToLower() == "mssql" || type.ToLower() == "postgres")
                 {
-                    var kernelString = config["Database"]["Kernel"].ToString();
-                    var strategyString = config["Database"]["Strategies"].ToString();
-                    var quantappString = config["Database"]["QuantApp"].ToString();
-                    Databases(kernelString, strategyString, quantappString);
+                    if(config["Database"]["Connection"] == null)
+                    {
+                        var kernelString = config["Database"]["Kernel"].ToString();
+                        var strategyString = config["Database"]["Strategies"].ToString();
+                        var quantappString = config["Database"]["QuantApp"].ToString();
+                        Databases(kernelString, strategyString, quantappString);
+                    }
+                    else
+                    {
+                        var kernelString = config["Database"]["Connection"].ToString();
+                        var strategyString = kernelString;
+                        var quantappString = kernelString;
+                        Databases(kernelString, strategyString, quantappString);
+                    }
                 }
                 else
                 {
-                    var connectionString = config["Database"].ToString();
+                    var connectionString = config["Database"]["Connection"].ToString();
                     Databases(connectionString);
                 }
+
                 Console.WriteLine("DB Connected");
 
                 Console.WriteLine("Local build");
 
-                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name));
+                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
                 var res = Code.BuildRegisterPackage(pkg);
 
                 if(string.IsNullOrEmpty(res))
@@ -377,18 +478,51 @@ namespace CoFlows.Server.Quant
             {
                 PythonEngine.BeginAllowThreads();
 
-                if(config["Database"].Children().Count() > 0)
+                var type = config["Database"]["Type"].ToString();
+                if(type.ToLower() == "mssql" || type.ToLower() == "postgres")
                 {
-                    var kernelString = config["Database"]["Kernel"].ToString();
-                    var strategyString = config["Database"]["Strategies"].ToString();
-                    var quantappString = config["Database"]["QuantApp"].ToString();
-                    Databases(kernelString, strategyString, quantappString);
+                    if(config["Database"]["Connection"] == null)
+                    {
+                        var kernelString = config["Database"]["Kernel"].ToString();
+                        var strategyString = config["Database"]["Strategies"].ToString();
+                        var quantappString = config["Database"]["QuantApp"].ToString();
+                        Databases(kernelString, strategyString, quantappString);
+                    }
+                    else
+                    {
+                        var kernelString = config["Database"]["Connection"].ToString();
+                        var strategyString = kernelString;
+                        var quantappString = kernelString;
+                        Databases(kernelString, strategyString, quantappString);
+                    }
                 }
                 else
                 {
-                    var connectionString = config["Database"].ToString();
+                    var connectionString = config["Database"]["Connection"].ToString();
                     Databases(connectionString);
                 }
+
+                // QuantSpecific START
+                if(config["Quant"] != null)
+                {
+                    Instrument.TimeSeriesLoadFromDatabaseIntraday = config["Quant"]["Intraday"].ToString().ToLower() == "true";
+                    if(Instrument.TimeSeriesLoadFromDatabaseIntraday)
+                        Console.WriteLine("Intraday Timeseries");
+                    else
+                        Console.WriteLine("Close Timeseries");
+                    Strategy.Executer = true;
+                    // Market.Initialize();
+
+                    var saveAll = config["Quant"]["AutoSave"].ToString().ToLower() == "true";
+                    if (saveAll) {
+                        var ths = new System.Threading.Thread(x => (AQI.AQILabs.Kernel.Instrument.Factory as AQI.AQILabs.Kernel.Adapters.SQL.Factories.SQLInstrumentFactory).SaveAllLoop(5));
+                        ths.Start();
+                    }
+                    else
+                        Console.WriteLine("Not saving timeseries");
+                }
+                // QuantSpecific END
+
                 Console.WriteLine("Local Query " + DateTime.Now);
                 Console.WriteLine("DB Connected");
 
@@ -403,7 +537,7 @@ namespace CoFlows.Server.Quant
                 Console.WriteLine("Parameters: " + parameters);
 
 
-                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name));
+                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
                 Code.ProcessPackageJSON(pkg);
 
                 var _g = Group.FindGroup(pkg.ID);
@@ -452,7 +586,7 @@ namespace CoFlows.Server.Quant
                 Console.WriteLine("Started: " + t0);
 
 
-                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name));
+                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
                 var res = Code.BuildRegisterPackage(pkg);
 
                 if(string.IsNullOrEmpty(res))
@@ -622,7 +756,7 @@ namespace CoFlows.Server.Quant
 
                 Console.Write("Starting azure deployment... ");
 
-                Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name);
+                Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null));
                 var resDeploy = Connection.Client.PublishPackage(CoFlows.Server.Program.workflow_name);
                 var t1 = DateTime.Now;
                 Console.WriteLine("Ended: " + t1 + " taking " + (t1 - t0));
@@ -634,7 +768,7 @@ namespace CoFlows.Server.Quant
                 Console.WriteLine();
                 Console.WriteLine("Azure Container Instance remove start");
 
-                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name));
+                var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
                 var res = Code.BuildRegisterPackage(pkg);
 
                 if(!string.IsNullOrEmpty(res))
@@ -673,6 +807,236 @@ namespace CoFlows.Server.Quant
                 catch (Exception)
                 {
                     Console.WriteLine("Did not create any resources in Azure. No clean up is necessary");
+                }
+            }
+            //Add
+            else if(args != null && args.Length > 1 && args[0] == "add")
+            {
+                PythonEngine.BeginAllowThreads();
+
+                // Databases(connectionString);
+                var type = config["Database"]["Type"].ToString();
+                if(type.ToLower() == "mssql" || type.ToLower() == "postgres")
+                {
+                    if(config["Database"]["Connection"] == null)
+                    {
+                        var kernelString = config["Database"]["Kernel"].ToString();
+                        var strategyString = config["Database"]["Strategies"].ToString();
+                        var quantappString = config["Database"]["QuantApp"].ToString();
+                        Databases(kernelString, strategyString, quantappString);
+                    }
+                    else
+                    {
+                        var kernelString = config["Database"]["Connection"].ToString();
+                        var strategyString = kernelString;
+                        var quantappString = kernelString;
+                        Databases(kernelString, strategyString, quantappString);
+                    }
+                }
+                else
+                {
+                    var connectionString = config["Database"]["Connection"].ToString();
+                    Databases(connectionString);
+                }
+
+                Console.WriteLine("Add " + DateTime.Now);
+                Console.WriteLine("DB Connected");
+
+                Console.WriteLine("CoFlows add to workflow... ");
+
+                //sh add.sh query (cs, fs, py, java, scala, js, vb)
+                //sh add.sh agent (cs, fs, py, java, scala, js, vb)
+                //sh add.sh pip name
+                //sh add.sh jar url
+                //sh add.sh nuget name version
+
+                var cmd = args[1];
+                Console.WriteLine("Command: " + cmd);
+
+                if(cmd == "query")
+                {
+                    
+                    var lang = args[2].ToLower();
+                    var name = args[3];
+                    Console.WriteLine("     Creating new query: " + name);
+
+                    if(lang == "cs")
+                    {
+                        Console.WriteLine("     generating C# query...");
+                        string query = File.ReadAllText("scripts/Queries/csQuery.cs").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".cs", query);
+                    }
+                    else if(lang == "fs")
+                    {
+                        Console.WriteLine("     generating F# query...");
+                        string query = File.ReadAllText("scripts/Queries/fsQuery.fs").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".fs", query);
+                    }
+                    else if(lang == "py")
+                    {
+                        Console.WriteLine("     generating Python query...");
+                        string query = File.ReadAllText("scripts/Queries/pythonQuery.py").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".py", query);
+                    }
+                    else if(lang == "java")
+                    {
+                        Console.WriteLine("     generating Java query...");
+                        string query = File.ReadAllText("scripts/Queries/javaQuery.java").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".java", query);
+                    }
+                    else if(lang == "scala")
+                    {
+                        Console.WriteLine("     generating Scala query...");
+                        string query = File.ReadAllText("scripts/Queries/scalaQuery.scala").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".scala", query);
+                    }
+                    else if(lang == "js")
+                    {
+                        Console.WriteLine("     generating Javascript query...");
+                        string query = File.ReadAllText("scripts/Queries/javascriptQuery.js").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".js", query);
+                    }
+                    else if(lang == "vb")
+                    {
+                        Console.WriteLine("     generating VB query...");
+                        string query = File.ReadAllText("scripts/Queries/vbQuery.vb").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Queries/");
+                        File.WriteAllText("/app/mnt/Queries/" + name + ".vb", query);
+                    }
+
+                    var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
+                    var res = Code.BuildRegisterPackage(pkg);
+                    if(string.IsNullOrEmpty(res))
+                        Console.WriteLine("Success!!!");
+                    else
+                        Console.WriteLine(res);
+                }
+                else if(cmd == "dash")
+                {
+                    
+                    var name = args[2];
+                    Console.WriteLine("     Creating new dash app: " + name);
+
+                    Console.WriteLine("     generating dash app...");
+                    string query = File.ReadAllText("scripts/Queries/dash.py").Replace("XXX", name);
+                    Directory.CreateDirectory("/app/mnt/Queries/");
+                    File.WriteAllText("/app/mnt/Queries/" + name + ".py", query);
+
+                    string sourceDirectory = @"scripts/Files";
+                    string targetDirectory = @"/app/mnt/Files" + name;
+                    CoFlows.Server.Program.Copy(sourceDirectory, targetDirectory, name);
+
+                    var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
+                    var res = Code.BuildRegisterPackage(pkg);
+                    if(string.IsNullOrEmpty(res))
+                        Console.WriteLine("Success!!!");
+                    else
+                        Console.WriteLine(res);
+                }
+                else if(cmd == "workflow")
+                {
+                    var name = args[2];
+                    Console.WriteLine("     Creating new Workflow: " + name);
+
+                    Console.WriteLine("     generating the Workflow...");
+
+
+                    string sourceDirectory = @"scripts/Workflow";
+                    string targetDirectory = @"/app/mnt/" + name;
+
+                    CoFlows.Server.Program.Copy(sourceDirectory, targetDirectory, name);
+                }
+                else if(cmd == "agent")
+                {
+                    
+                    var lang = args[2].ToLower();
+                    var name = args[3];
+                    Console.WriteLine("     Creating new agent: " + name);
+
+                    if(lang == "cs")
+                    {
+                        Console.WriteLine("     generating C# agent...");
+                        string agent = File.ReadAllText("scripts/Agents/csAgent.cs").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".cs", agent);
+                    }
+                    else if(lang == "fs")
+                    {
+                        Console.WriteLine("     generating F# agent...");
+                        string agent = File.ReadAllText("scripts/Agents/fsAgent.fs").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".fs", agent);
+                    }
+                    else if(lang == "py")
+                    {
+                        Console.WriteLine("     generating Python agent...");
+                        string agent = File.ReadAllText("scripts/Agents/pythonAgent.py").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".py", agent);
+                    }
+                    else if(lang == "java")
+                    {
+                        Console.WriteLine("     generating Java agent...");
+                        string agent = File.ReadAllText("scripts/Agents/javaAgent.java").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".java", agent);
+                    }
+                    else if(lang == "scala")
+                    {
+                        Console.WriteLine("     generating Scala agent...");
+                        string agent = File.ReadAllText("scripts/Agents/scalaAgent.scala").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".scala", agent);
+                    }
+                    else if(lang == "js")
+                    {
+                        Console.WriteLine("     generating Javascript agent...");
+                        string agent = File.ReadAllText("scripts/Agents/javascriptAgent.js").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".js", agent);
+                    }
+                    else if(lang == "vb")
+                    {
+                        Console.WriteLine("     generating VB agent...");
+                        string agent = File.ReadAllText("scripts/Agents/vbAgent.vb").Replace("XXX", name);
+                        Directory.CreateDirectory("/app/mnt/Agents/");
+                        File.WriteAllText("/app/mnt/Agents/" + name + ".vb", agent);
+                    }
+
+                    var pkg = Code.ProcessPackageFile(Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null)), true);
+                    var res = Code.BuildRegisterPackage(pkg);
+                    if(string.IsNullOrEmpty(res))
+                        Console.WriteLine("Success!!!");
+                    else
+                        Console.WriteLine(res);
+                }
+                else if(cmd == "nuget")
+                {
+                    var name = args[2];
+                    var version = args[3];
+                    Console.WriteLine("     Installing nuget package: " + name + " @ " + version);
+                    Code.InstallNuGetAssembly(name, version);
+                    Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(name, version), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(null));                
+                }
+                else if(cmd == "pip")
+                {
+                    var pip = args[2];
+                    Console.WriteLine("     Installing pip package: " + pip);
+                    Code.InstallPip(pip);
+                    Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(pip), new QuantApp.Engine.JarPackage(null));
+                }
+                else if(cmd == "jar")
+                {
+                    var jar = args[2];
+                    Console.WriteLine("     Installing jar package: " + jar);
+                    Code.InstallJar(jar);
+                    Code.UpdatePackageFile(CoFlows.Server.Program.workflow_name, new QuantApp.Engine.NuGetPackage(null, null), new QuantApp.Engine.PipPackage(null), new QuantApp.Engine.JarPackage(jar));
                 }
             }
             else
@@ -924,7 +1288,31 @@ namespace CoFlows.Server.Quant
             {         
                 if(KernelConnectString.StartsWith("Server="))
                 {
+                    var _KernelDataAdapter = new MSSQLDataSetAdapter();
+                    _KernelDataAdapter.ConnectString = KernelConnectString;
+                    _KernelDataAdapter.CreateDB(KernelConnectString, new List<Tuple<string, string>> {
+                        Tuple.Create("sql/create.sql", File.ReadAllText(@"sql/create.sql")),
+                        Tuple.Create("sql/quant.sql", File.ReadAllText(@"sql/quant.sql")),
+                        Tuple.Create("sql/calendars.sql", File.ReadAllText(@"sql/calendars.sql")),
+                        Tuple.Create("sql/fic.sql", File.ReadAllText(@"sql/fic.sql"))
+                    });
+
                     MSSQLDataSetAdapter KernelDataAdapter = new MSSQLDataSetAdapter();
+                    KernelDataAdapter.ConnectString = KernelConnectString;
+                    QuantApp.Kernel.Database.DB.Add("Kernel", KernelDataAdapter);
+                }
+                else if(KernelConnectString.StartsWith("Host="))
+                {
+                    var _KernelDataAdapter = new PostgresDataSetAdapter();
+                    _KernelDataAdapter.ConnectString = KernelConnectString;
+                    _KernelDataAdapter.CreateDB(KernelConnectString, new List<Tuple<string, string>> {
+                        Tuple.Create("sql/create.sql", File.ReadAllText(@"sql/create.sql")),
+                        Tuple.Create("sql/quant.sql", File.ReadAllText(@"sql/quant.sql")),
+                        Tuple.Create("sql/calendars.sql", File.ReadAllText(@"sql/calendars.sql")),
+                        Tuple.Create("sql/fic.sql", File.ReadAllText(@"sql/fic.sql"))
+                    });
+
+                    var KernelDataAdapter = new PostgresDataSetAdapter();
                     KernelDataAdapter.ConnectString = KernelConnectString;
                     QuantApp.Kernel.Database.DB.Add("Kernel", KernelDataAdapter);
                 }
@@ -1026,9 +1414,9 @@ namespace CoFlows.Server.Quant
         }
 
 
-        public static IEnumerable<Workflow> GetDefaultWorkflows()
+        public static IEnumerable<Workflow> LocalWorkflows()
         {
-            return CoFlows.Server.Program.GetDefaultWorkflows();
+            return CoFlows.Server.Program.LocalWorkflows();
         }
 
         public static void AddServicedWorkflows(string id)

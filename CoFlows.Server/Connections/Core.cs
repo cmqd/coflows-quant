@@ -33,7 +33,7 @@ using QuantApp.Kernel.Adapters.SQL;
 
 using System.Data;
 
-namespace QuantApp.Core
+namespace CoFlows.Core
 {
     public class Initialize
     {
@@ -78,7 +78,8 @@ namespace QuantApp.Core
 
     public class Connection
     {
-        private int timeout = 1000 * 60 * 20;
+        // private int timeout = 1000 * 60 * 20;
+        public static int timeout = 5;
         public static Connection Client = new Connection();
 
         public string server = "localhost";
@@ -292,12 +293,11 @@ namespace QuantApp.Core
         public string GetString(string path, object arg)
         {
             HttpClient httpClient = new HttpClient();
-            httpClient.Timeout = Timeout.InfiniteTimeSpan;
+            httpClient.Timeout = new TimeSpan(0,0,timeout);
             
             httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             
             if(_token != null && path != "account/login")
-            
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
             
             var res = httpClient.PostAsync(QuantAppURL.AbsoluteUri + path, arg.AsJson()).Result;
@@ -307,7 +307,7 @@ namespace QuantApp.Core
         public string GetURL(string path)
         {
             HttpClient httpClient = new HttpClient();
-            httpClient.Timeout = Timeout.InfiniteTimeSpan;
+            httpClient.Timeout = new TimeSpan(0,0,timeout);
             
             httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             
@@ -329,7 +329,7 @@ namespace QuantApp.Core
                 header.Add("Authorization", "Bearer " + _token);
                 req.Headers = header;
             }
-            req.Timeout = timeout;
+            req.Timeout = timeout * 1000;
 
             string requestContent = "";
             req.ContentLength = requestContent.Length;
@@ -388,6 +388,9 @@ namespace QuantApp.Core
 
         public Boolean Login(string key)
         {
+            _token = null;
+            _session = null; 
+
             _code = key;
             
             LogOnResult logonRes = GetObject<LogOnResult>("account/login", new { Code = key });
@@ -415,42 +418,42 @@ namespace QuantApp.Core
 
         public string PublishPackage(string file)
         {
-            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file);
+            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file, true);
             return PublishPackage(pkg);
         }
 
         public string BuildPackage(string file)
         {
-            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file);
+            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file, true);
             return BuildPackage(pkg);
         }
 
         public string RemoteLog(string file)
         {
-            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file);
+            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file, true);
             return RemoteLogID(pkg.ID);
         }
 
         public string RemoteRestart(string file)
         {
-            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file);
+            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file, true);
             return RemoteRestart(pkg);
         }
 
         public string RemoteRemove(string file)
         {
-            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file);
+            var pkg = QuantApp.Engine.Code.ProcessPackageFile(file, true);
             return RemoteRemoveID(pkg.ID);
         }
 
         public string PublishPackage(QuantApp.Engine.PKG pkg)
         {
-            return GetString("m/CreatePKGFromJSON",  pkg);
+            return GetString("flow/CreateWorkflow",  pkg);
         }
 
         public string BuildPackage(QuantApp.Engine.PKG pkg)
         {
-            return GetString("m/CompileFromJSON",  pkg);
+            return GetString("flow/CompileWorkflow",  pkg);
         }
 
         public class CreateComputeResult
@@ -460,7 +463,7 @@ namespace QuantApp.Core
         }
         public Compute CreateCompute(QuantApp.Engine.PKG pkg)
         {
-            var res = GetObject<CreateComputeResult>("m/CreateComputeFromJSON",  pkg);
+            var res = GetObject<CreateComputeResult>("cluster/CreateComputeFromJSON",  pkg);
             var comp = new Compute(pkg, this, res);
             return comp;
         }
@@ -469,7 +472,7 @@ namespace QuantApp.Core
         {
             var workflow = QuantApp.Kernel.M.Base(workflowID)[x => true].First() as Workflow;
             var pkg = QuantApp.Engine.Code.ProcessPackageWorkflow(workflow);
-            var res = GetObject<CreateComputeResult>("m/CreateComputeFromJSON",  pkg);
+            var res = GetObject<CreateComputeResult>("cluster/CreateComputeFromJSON",  pkg);
             var comp = new Compute(pkg, this, res);
             return comp;
         }
@@ -477,7 +480,7 @@ namespace QuantApp.Core
         public string RemoteLogID(string workflowID)
         {
             var podname = workflowID;
-            string res = GetURL("m/PodLog?id=" + podname);
+            string res = GetURL("cluster/PodLog?id=" + podname);
 
             var jobj = Newtonsoft.Json.Linq.JObject.Parse(res);
 
@@ -492,13 +495,13 @@ namespace QuantApp.Core
                 return log_str.ToString();
             }
 
-            return (string)jobj["Result"];
+            return (string)jobj["Result"]; 
         }
 
         public string RemoteRestart(QuantApp.Engine.PKG pkg)
         {
             var podname = pkg.ID;
-            string res = GetURL("m/RestartPod?id=" + podname);
+            string res = GetURL("cluster/RestartPod?id=" + podname);
 
             var jobj = Newtonsoft.Json.Linq.JObject.Parse(res);
 
@@ -509,7 +512,7 @@ namespace QuantApp.Core
         public string RemoteRemoveID(string workflowID)
         {
             var podname = workflowID;
-            string res = GetURL("m/RemovePod?id=" + podname);
+            string res = GetURL("cluster/RemovePod?id=" + podname);
 
             var jobj = Newtonsoft.Json.Linq.JObject.Parse(res);
 
@@ -531,7 +534,7 @@ namespace QuantApp.Core
 
         public object Execute(string code, string code_name, string workflowID, string queryID, string funcName, params object[] parameters)
         {
-            var res = GetString("m/PostEC",  new CallData(){ 
+            var res = GetString("flow/createquery",  new CallData(){ 
                 Code = new QuantApp.Engine.CodeData(code_name, queryID, code, workflowID),
                 Function = new FunctionData() { Name = funcName, Parameters = parameters }
             });
@@ -558,7 +561,7 @@ namespace QuantApp.Core
 
         public object Execute(string workflowID, string queryID, string funcName, params object[] parameters)
         {
-            var res = GetString("m/PostEC",  new CallData(){ 
+            var res = GetString("flow/createquery",  new CallData(){ 
                 Code = new QuantApp.Engine.CodeData("", queryID, "", workflowID),
                 Function = new FunctionData() { Name = funcName, Parameters = parameters }
             });

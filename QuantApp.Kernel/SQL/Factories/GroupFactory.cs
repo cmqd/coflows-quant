@@ -321,8 +321,7 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
         {
             lock (list1Lock)
             {
-
-                string key = user.ID + group.ID + type + aggregated;
+                string key = (user == null ? "" : user.ID) + group.ID + type + aggregated;
 
                 if (_listPermissibleTypeAccessType.ContainsKey(key))
                     return _listPermissibleTypeAccessType[key];
@@ -354,7 +353,7 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                     DataRowCollection rows = table.Rows;
 
                     System.Diagnostics.Debug.WriteLine("List: " + user + " " + group + " " + type);
-
+                    
                     if (rows.Count != 0)
                         foreach (DataRow row in rows)
                         {
@@ -368,25 +367,25 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                             _rawPermissibleTypeDB[gid].TryAdd((string)row["PermissibleID"], (string)row["Type"]);
                         }
                 }
-                else
+                
+                if (_rawPermissibleTypeDB.ContainsKey(group.ID))
                 {
-
-                    if (_rawPermissibleTypeDB.ContainsKey(group.ID))
-                    {
-                        foreach (string pid in _rawPermissibleTypeDB[group.ID].Keys.ToList())
-                            if (_rawPermissibleTypeDB[group.ID][pid] == type.ToString())
-                            {
-                                IPermissible permissible = Group.FindPermissible(user, type, pid);
-                                if (permissible != null && !result.Contains(permissible))
-                                    result.Add(permissible);
-                            }
-                    }
+                    foreach (string pid in _rawPermissibleTypeDB[group.ID].Keys.ToList())
+                        if (_rawPermissibleTypeDB[group.ID][pid] == type.ToString())
+                        {
+                            IPermissible permissible = Group.FindPermissible(user, type, pid);
+                            if (permissible != null && !result.Contains(permissible))
+                                result.Add(permissible);
+                        }
                 }
 
                 if (result.Count > 0)
                     try
                     {
-                        _listPermissibleTypeAccessType.TryAdd(key, result);
+                        if(!_listPermissibleTypeAccessType.ContainsKey(key))
+                            _listPermissibleTypeAccessType.TryAdd(key, result);
+                        else
+                            _listPermissibleTypeAccessType[key] = result;
                     }
                     catch { }
 
@@ -400,8 +399,7 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
         {
             lock (list2Lock)
             {
-
-                string key = user.ID + group.ID + type + accessType + aggregated;
+                string key = (user == null ? "" : user.ID) + group.ID + type + aggregated;
 
                 if (_listPermissibleTypeAccessType.ContainsKey(key))
                     return _listPermissibleTypeAccessType[key];
@@ -433,7 +431,7 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                     DataRowCollection rows = table.Rows;
 
                     System.Diagnostics.Debug.WriteLine("List: " + user + " " + group + " " + type);
-
+                    
                     if (rows.Count != 0)
                         foreach (DataRow row in rows)
                         {
@@ -447,21 +445,20 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                             _rawPermissibleTypeDB[gid].TryAdd((string)row["PermissibleID"], (string)row["Type"]);
                         }
                 }
-                else
+                
+                if (_rawPermissibleTypeDB.ContainsKey(group.ID))
                 {
 
-                    if (_rawPermissibleTypeDB.ContainsKey(group.ID))
-                    {
-                        foreach (string pid in _rawPermissibleTypeDB[group.ID].Keys.ToList())
-                            if (_rawPermissibleTypeDB[group.ID][pid] == type.ToString() && (int)_rawPermissibleDB[group.ID][pid] >= (int)accessType)
-                            {
-                                IPermissible permissible = Group.FindPermissible(user, type, pid);
-                                if (permissible != null && !result.Contains(permissible))
-                                    result.Add(permissible);
-                            }
-                    }
+                    foreach (string pid in _rawPermissibleTypeDB[group.ID].Keys.ToList())
+                        if (_rawPermissibleTypeDB[group.ID][pid] == type.ToString() && (int)_rawPermissibleDB[group.ID][pid] >= (int)accessType)
+                        {
+                            IPermissible permissible = Group.FindPermissible(user, type, pid);
+                            
+                            if (permissible != null && !result.Contains(permissible))
+                                result.Add(permissible);
+                        }
                 }
-
+            
                 try
                 {
                     if (result.Count > 0)
@@ -474,7 +471,16 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
         }
 
         public readonly static object permLock = new object();
+
         public AccessType Permission(User user, Group group, IPermissible permissible)
+        {
+            var exp = Expiry(user, group, permissible);
+            if(exp.Date < DateTime.Today)
+                return AccessType.Denied;
+            return _Permission(user, group, permissible);
+
+        }
+        private AccessType _Permission(User user, Group group, IPermissible permissible)
         {
             lock (permLock)
             {
@@ -532,17 +538,28 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                             DataRowCollection rows = table.Rows;
 
                             System.Diagnostics.Debug.WriteLine("Permission: " + user + " " + group + " " + permissible + " " + type);
-
+                            
                             if (rows.Count != 0)
                                 foreach (DataRow row in rows)
                                 {
                                     string gid = (string)row["GroupID"];
+
+                                    DateTime expiry = DateTime.MaxValue;
+                                    if(table.Columns.Contains("Expiry"))
+                                        if(!(row["Expiry"] is DBNull))
+                                            expiry = (DateTime)row["Expiry"];
+                                    
+                                    AccessType access = (AccessType)row["AccessType"];
+
+                                    if(expiry < DateTime.Now)
+                                        access = AccessType.Denied;
+
                                     if (!_rawPermissibleDB.ContainsKey(gid))
                                         _rawPermissibleDB.TryAdd(gid, new ConcurrentDictionary<string, AccessType>());
                                     if (!_rawPermissibleTypeDB.ContainsKey(gid))
                                         _rawPermissibleTypeDB.TryAdd(gid, new ConcurrentDictionary<string, string>());
 
-                                    _rawPermissibleDB[gid].TryAdd((string)row["PermissibleID"], (AccessType)row["AccessType"]);
+                                    _rawPermissibleDB[gid].TryAdd((string)row["PermissibleID"], access);
                                     _rawPermissibleTypeDB[gid].TryAdd((string)row["PermissibleID"], (string)row["Type"]);
                                 }
                         }
@@ -591,6 +608,37 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
             }
         }
 
+        public readonly static object expiryLock = new object();
+        
+        public DateTime Expiry(User user, Group group, IPermissible permissible)
+        {
+            lock (expiryLock)
+            {
+                string tableName = permissionTableName;
+                string searchString = "PermissibleID = '" + permissible.PermissibleID + "' AND GroupID = '" + group.ID + "'";
+                string targetString = null;
+                DataTable table = Database.DB["CloudApp"].GetDataTable(tableName, targetString, searchString);
+                DataRowCollection rows = table.Rows;
+
+                System.Diagnostics.Debug.WriteLine("Expiry: " + user + " " + group + " " + permissible);
+
+                if (rows.Count != 0)
+                    foreach (DataRow row in rows)
+                    {
+                        string gid = (string)row["GroupID"];
+
+                        DateTime expiry = DateTime.MaxValue;
+                        if(table.Columns.Contains("Expiry"))
+                            if(!(row["Expiry"] is DBNull))
+                                expiry = (DateTime)row["Expiry"];
+
+                        return expiry;            
+                    }
+                
+                return DateTime.MaxValue;
+            }
+        }
+
         public bool Exists(Group group, IPermissible permissible)
         {
             string tableName = permissionTableName;
@@ -623,7 +671,7 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
             _rawPermissibleTypeDB = new ConcurrentDictionary<string, ConcurrentDictionary<string, string>>();
         }
 
-        public void Add(Group group, IPermissible permissible, Type type, AccessType accessType)
+        public void Add(Group group, IPermissible permissible, Type type, AccessType accessType, DateTime? expiry)
         {
             CleanMemory();
             string tableName = permissionTableName;
@@ -640,12 +688,17 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                 r["Type"] = type.ToString();
                 r["AccessType"] = (int)accessType;
 
+                if (table.Columns.Contains("Expiry") && expiry.HasValue)
+                    r["Expiry"] = expiry.Value;
+
                 rows.Add(r);
                 Database.DB["CloudApp"].UpdateDataTable(table);
             }
             else
             {
                 rows[0]["AccessType"] = (int)accessType;
+                if (table.Columns.Contains("Expiry") && expiry.HasValue)
+                    rows[0]["Expiry"] = expiry.Value;
                 Database.DB["CloudApp"].UpdateDataTable(table);
             }
         }

@@ -109,6 +109,9 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                 if (user == null)
                     return null;
 
+                if(user == "System")
+                    return new QuantApp.Kernel.User("System");
+
                 if (_userDB.ContainsKey(user))
                     return _userDB[user];
 
@@ -122,14 +125,20 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                 {
                     foreach (DataRow row in rows)
                     {
-                        User u = new User(user);
+                        var firstName = GetValue(row, "FirstName", typeof(string)) as string;
+                        var lastName = GetValue(row, "LastName", typeof(string)) as string;
+                        var email = GetValue(row, "Email", typeof(string)) as string;
+                        var meta = GetValue(row, "MetaData", typeof(string)) as string;
+                        var secret = GetValue(row, "Secret", typeof(string)) as string;
+
+                        User u = new User(user, firstName, lastName, email, meta, secret);
                         _userDB.Add(user, u);
                         return u;
                     }
                 }
 
-                if (user.StartsWith("QuantAppSecure:"))
-                    return new User(user);
+                // if (user.StartsWith("QuantAppSecure:"))
+                //     return new User(user);
 
                 return null;
             }
@@ -153,7 +162,14 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                     foreach (DataRow row in rows)
                     {
                         var user = GetValue(row, "TenantName", typeof(string)) as string;
-                        User u = new User(user);
+                        var firstName = GetValue(row, "FirstName", typeof(string)) as string;
+                        var lastName = GetValue(row, "LastName", typeof(string)) as string;
+                        var email = GetValue(row, "Email", typeof(string)) as string;
+                        var meta = GetValue(row, "MetaData", typeof(string)) as string;
+                        var secret = GetValue(row, "Secret", typeof(string)) as string;
+
+                        User u = new User(user, firstName, lastName, email, meta, secret);
+                        // User u = new User(user);
                         if(!_userDB.ContainsKey(user))
                             _userDB.Add(user, u);
                         return u;
@@ -383,7 +399,9 @@ namespace QuantApp.Kernel.Adapters.SQL.Factories
                 rows.Add(r);
                 Database.DB["CloudApp"].UpdateDataTable(table);
 
-                return new User(id);
+                // return new User(id);
+
+                return new User(id, (string)r["FirstName"], (string)r["LastName"], (string)r["Email"], null, null);
             }
 
             return null;

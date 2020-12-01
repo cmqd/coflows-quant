@@ -84,7 +84,7 @@ export class HeaderComponent implements OnInit {
 
   onSubmitProfile() {
 
-    this.coflows.Post('administration/updateuser_app', { UserID: this.coflows.quser.User.ID, First: this.formProfile.value.firstName, Last: this.formProfile.value.lastName},
+    this.coflows.Post('administration/updateuser', { UserID: this.coflows.quser.User.ID, FirstName: this.formProfile.value.firstName, LastName: this.formProfile.value.lastName},
         data => {
             if(data.Data == "ok"){
               this.coflows.showMessage('profile updated...')
@@ -111,6 +111,12 @@ export class HeaderComponent implements OnInit {
         }
         
       }
-    );
-}
+    )
+  }
+
+  generateSecret(){
+    this.coflows.Get('administration/resetsecret', secret => {
+      this.coflows.quser.User.Secret = secret
+    }, err => console.log(err))
+  }
 }

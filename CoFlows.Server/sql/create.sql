@@ -25,11 +25,13 @@ CREATE TABLE PermissionsRepository (
     PermissibleID Varchar(250) Not Null,
     GroupID Varchar(50) Not Null,
     AccessType Int Not Null,
+    Expiry DateTime,
     Type Text Not Null,
     PRIMARY KEY (PermissibleID, GroupID)
     );
 
-INSERT INTO PermissionsRepository (PermissibleID, GroupID, AccessType, Type) Values ('QuantAppSecure_root','Public',0,'QuantApp.Kernel.User');
+INSERT INTO PermissionsRepository (PermissibleID, GroupID, AccessType, Type) Values ('QuantAppSecure_root','Administrator',2,'QuantApp.Kernel.User');
+INSERT INTO PermissionsRepository (PermissibleID, GroupID, AccessType, Type) Values ('QuantAppSecure_root','Public',2,'QuantApp.Kernel.User');
 INSERT INTO PermissionsRepository (PermissibleID, GroupID, AccessType, Type) Values ('QuantAppSecure_anonymous','Public',0,'QuantApp.Kernel.User');
 
 CREATE TABLE Users (
@@ -72,4 +74,14 @@ CREATE TABLE M (
     Assembly Text Not Null,
     Type Text Not Null,
     PRIMARY KEY (ID,EntryID)
+    );
+
+CREATE TABLE FileRepository (
+    ID Varchar(150) Not Null,
+    Name Varchar(150) Not Null,
+    UserID Varchar(150) Not Null,
+    Type Varchar(150) Not Null,
+    Timestamp DateTime Not Null,
+    Data Text Not Null,
+    PRIMARY KEY (ID)
     );

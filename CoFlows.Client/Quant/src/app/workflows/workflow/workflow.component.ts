@@ -1,12 +1,11 @@
 import { Component, ViewChild, ElementRef } from '@angular/core';
-import { Chart } from 'angular-highcharts';
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap';
+import { FileUploader } from 'ng2-file-upload/ng2-file-upload';
 
 import { ActivatedRoute } from '@angular/router';
 
 import { CoFlowsComponent } from '../../coflows/core/coflows.component';
 import { CFQueryComponent } from '../../coflows/query/cfquery.component';
-import { QAStrategiesComponent } from '../../quant/strategies/qastrategies.component';
 
 import { NgbTabset } from '@ng-bootstrap/ng-bootstrap';
 
@@ -22,12 +21,7 @@ import * as CodeMirror from 'codemirror/lib/codemirror.js';
   selector: 'workflow-component',
   
   templateUrl: './workflow.component.html',
-  styles: [
-      `
-  :host >>> .CodeMirror {
-    height: auto;
-  }
-  `]
+  styleUrls: ['./workflow.component.scss']
 })
 export class WorkflowComponent {
     rows = []
@@ -52,20 +46,31 @@ export class WorkflowComponent {
     containerChart = {}
     processesChart = {}
 
-    @ViewChild('qastrategies')
-    private qastrategies:QAStrategiesComponent
-
     @ViewChild('cfquery')
     private cfquery:CFQueryComponent
 
     @ViewChild('logarea')
     private logArea:ElementRef
 
+    uploader: FileUploader
+    hasBaseDropZoneOver = false
+    hasAnotherDropZoneOver = false
+    response:string
+
+    fileOverBase(e: any): void {
+        this.hasBaseDropZoneOver = e
+    }
+
+    fileOverAnother(e: any): void {
+        this.hasAnotherDropZoneOver = e;
+    }
+
     
     private newPermission = 0
+    private newDate = { year: 9999, month: 12, day: 31 }
     private newEmail = ''
 
-    private newGroup = ''
+    private newGroup = { Name: '', Description: '' }
 
     selectedWB = {Name: "All", ID: ""}
     selectedFunc = {Name: "Workbook", ID: "Workbook"}
@@ -83,7 +88,7 @@ export class WorkflowComponent {
     }
 
     
-    users = { items: [] }
+    users = []
     users_filtered = []
     search = 'Loading users...'
 
@@ -97,13 +102,28 @@ export class WorkflowComponent {
         const val = event.target.value.toLowerCase()
         this.search = val
         // filter our data
-        const temp = this.users.items.filter(d => {
-            return (d.first.toLowerCase().indexOf(val) !== -1|| (d.last + "").toLowerCase().indexOf(val) !== -1 || d.email.toLowerCase().indexOf(val) !== -1) || !val
+        const temp = this.users.filter(d => {
+            return (d.FirstName.toLowerCase().indexOf(val) !== -1|| (d.LastName + "").toLowerCase().indexOf(val) !== -1 || d.Email.toLowerCase().indexOf(val) !== -1) || !val
         })
         // update the rows
         if(temp.length == 0)
             this.search = 'No users found...'
         this.users_filtered = temp
+    }
+    groupFiles = []
+
+    downloadFile(file) {
+        this.coflows.GetFile("files/file?fid=" + file.ID, data => {
+            var blob = new Blob([data], { type: data.type });
+
+            var a = document.createElement("a");
+            a.setAttribute('style', 'display:none;');
+            document.body.appendChild(a);
+            var url = window.URL.createObjectURL(blob);
+            a.href = url;
+            a.download =  file.Name;
+            a.click();
+        })
     }
 
     constructor(private activatedRoute: ActivatedRoute, private coflows: CoFlowsComponent, private modalService: NgbModal) {
@@ -111,10 +131,32 @@ export class WorkflowComponent {
         this.activatedRoute.params.subscribe(params => {
             this.wid = params['id'];
 
-            this.subgroups = [ { Name: 'Master', ID: this.wid }]
+            this.coflows.Get("account/getpermission?groupid=" + this.wid, data => {
+                this.permission = data.Data
+            })
+
+            this.uploader = new FileUploader({
+                url: coflows.coflows_server + 'files/uploadfile?groupid=' + this.wid,
+                authToken: 'Bearer ' + localStorage.getItem('CoFlows-CoFlowsJWT'),
+            })
+
+            this.coflows.Get("files/files?groupid=" + this.wid, data => {
+                this.groupFiles = data
+            })
+
+            this.uploader.onAfterAddingFile = (file) => { file.withCredentials = false }
+            
+            this.uploader.response.subscribe( res => { 
+                this.coflows.Get("files/files?groupid=" + this.wid, data => {
+                    this.groupFiles = data
+                })
+                this.response = res 
+            } )
+
+            this.subgroups = [ { Name: 'Master', ID: this.wid, Description: 'Master Group' }]
             this.activeGroupID = this.wid
             
-            this.users = { items: [] }
+            this.users = []
             this.users_filtered = []
             this.search = 'Loading users...'
 
@@ -128,11 +170,6 @@ export class WorkflowComponent {
 
                 this.workflow = data[0].Value
                 // console.log(this.workflow)
-
-                this.workflow.Permissions.forEach(x => {
-                    if(x.ID == this.coflows.quser.User.Email) this.permission = x.Permission
-                })
-
                 
                 if(this.permission == 2){
                     this.editorOptionsFs.readOnly = false
@@ -193,9 +230,6 @@ export class WorkflowComponent {
                     );
                 });
             
-                if(this.qastrategies != undefined)
-                    this.qastrategies.SetStrategies(data[0].Value.Strategies)
-
                 this.coflows.LinkAction(wiid,
                     data => { //Load
                         this.workbooks = data
@@ -304,9 +338,7 @@ export class WorkflowComponent {
                     );
                 });
             
-                if(this.qastrategies != undefined)
-                    this.qastrategies.SetStrategies(data.Value.Strategies)
-
+            
                 this.coflows.LinkAction(wiid,
                     data => { //Load
                         this.workbooks = data
@@ -349,7 +381,7 @@ export class WorkflowComponent {
             });
 
             // let t0 = Date.now()
-            this.coflows.Get("administration/UsersApp_contacts?groupid=" + this.wid + "&agreements=false", data => {
+            this.coflows.Get("administration/Users?groupid=" + this.wid, data => {
                 // console.log(data)
                 if(data == null){
                     this.users_filtered = []
@@ -357,14 +389,14 @@ export class WorkflowComponent {
                 }
                 else{
                     this.users = data
-                    this.users_filtered = this.users.items
+                    this.users_filtered = this.users
                     if(this.users_filtered.length == 0)
                         this.search = 'no users found'
                         // this.search = ''
                 }
             });
 
-            this.coflows.Get("administration/subgroupsapp?groupid=" + this.wid + "&aggregated=true", data => {
+            this.coflows.Get("administration/subgroups?groupid=" + this.wid + "&aggregated=true", data => {
                 // console.log(data)
                 this.subgroups = this.subgroups.concat(data);
             });
@@ -378,6 +410,9 @@ export class WorkflowComponent {
         this.activeModal = content
         this.modalService.open(content).result.then((result) => {
             
+            console.log(result)
+            
+
         }, (reason) => {
             // console.log(reason)
         });
@@ -390,17 +425,19 @@ export class WorkflowComponent {
     onChangeActiveFunction(id, item){     
         // console.log(id, item)
 
-        this.coflows.Get('m/activetoggle?id=' + id ,
+        this.coflows.Get('flow/activeagenttoggle?id=' + id ,
             data => {
                 console.log(data)
 
             });
     }
 
+    activeGroup = {}
     viewGroup(sgid){
         this.users_filtered = []
         this.search = 'loading users...'
-        this.coflows.Get("administration/UsersApp_contacts?groupid=" + sgid + "&agreements=false", data => {
+        this.coflows.Get("administration/Group?groupid=" + sgid, data => { this.activeGroup = data})
+        this.coflows.Get("administration/Users?groupid=" + sgid, data => {
             // console.log(data)
             this.activeGroupID = sgid
             if(data == null){
@@ -409,19 +446,18 @@ export class WorkflowComponent {
             }
             else{
                 this.users = data
-                this.users_filtered = this.users.items
+                this.users_filtered = this.users
                 if(this.users_filtered.length > 0)
                     this.search = ''
             }
         });
     }
     
-    setPermission(id, permission_old, permission_new){
-        console.log(id, permission_old, permission_new)
-        if(permission_old != permission_new){
-            this.coflows.Get('administration/setpermission?userid=' + id + '&groupid=' + this.activeGroupID + '&accessType=' + permission_new,
+    setPermission(id, permission_old, permission_new, date){
+        
+        if(permission_old != permission_new || permission_new == null){
+            this.coflows.Get('administration/setpermission?pid=' + id + '&groupid=' + this.activeGroupID + '&accessType=' + permission_new + '&year=' + date.year + '&month=' + date.month + '&day=' + date.day,
                 data => {
-                    // console.log(data)
                     this.coflows.showMessage('Permission updated')
                 });
         }
@@ -429,8 +465,7 @@ export class WorkflowComponent {
 
     addPermissionMessage = ''
     addPermission(){
-        // console.log(this.newEmail, this.newPermission)
-        this.coflows.Get('administration/addpermission?email=' + this.newEmail + '&groupid=' + this.wid + '&accessType=' + this.newPermission,
+        this.coflows.Get('administration/addpermission?email=' + this.newEmail + '&groupid=' + this.wid + '&accessType=' + this.newPermission + '&year=' + this.newDate.year + '&month=' + this.newDate.month + '&day=' + this.newDate.day,
             data => {
                 if(data.Data == "ok"){
 
@@ -439,36 +474,28 @@ export class WorkflowComponent {
 
                     let t0 = Date.now()
                     this.users_filtered = []
-                    this.coflows.Get("administration/UsersApp_contacts?groupid=" + this.wid + "&agreements=false", data => {
-                        // this.coflows.Get("administration/UsersApp_contacts?groupid=00ab632b-b083-4204-bc82-6b50aa2ffb8d&agreements=false", data => {
+                    this.coflows.Get("administration/Users?groupid=" + this.wid, data => {
                         this.users = data
-                        this.users_filtered = this.users.items
-                        // console.log(data, (Date.now() - t0) / 1000)
-                        this.search = ''
-                        
-                    });
-                    
-                    
+                        this.users_filtered = this.users
+                        this.search = ''                        
+                    });                    
                 }
                 else
                     this.addPermissionMessage = data.Data
-
-                // console.log(data)
             });
-        // AddPermission(string email, int accessType)
     }
 
     addGroupMessage = ''
     addGroup(){
         // console.log(this.newEmail, this.newPermission)
-        this.coflows.Get('administration/newsubgroup?name=' + this.newGroup + '&parendid=' + this.wid,
+        this.coflows.Post('administration/newsubgroup', { 'Name': this.newGroup.Name, 'Description': this.newGroup.Description, 'ParentID': this.wid },
             data => {
                 if(data.Data == "ok"){
                     this.modalService.dismissAll(this.activeModal)
 
-                    this.coflows.Get("administration/subgroupsapp?groupid=" + this.wid + "&aggregated=true", data => {
+                    this.coflows.Get("administration/subgroups?groupid=" + this.wid + "&aggregated=true", data => {
                         // console.log(data)
-                        this.subgroups = [ { Name: 'Master', ID: this.wid }]
+                        this.subgroups = [ { Name: 'Master', ID: this.wid, Description: 'Master Group'  }]
                         this.subgroups = this.subgroups.concat(data);
                         this.activeGroupID = this.subgroups[0].ID;
 
@@ -489,76 +516,68 @@ export class WorkflowComponent {
         this.coflows.Get('administration/RemoveGroup?id=' + this.activeGroupID,
             data => {
                 if(data.Data == "ok"){
-
-                    // this.search = 'Reloading permissions...'
                     this.modalService.dismissAll(this.activeModal)
 
-                    this.coflows.Get("administration/subgroupsapp?groupid=" + this.wid + "&aggregated=true", data => {
+                    this.coflows.Get("administration/subgroups?groupid=" + this.wid + "&aggregated=true", data => {
                         console.log(data)
-                        this.subgroups = [ { Name: 'Master', ID: this.wid }]
+                        this.subgroups = [ { Name: 'Master', ID: this.wid, Description: 'Master Group'  }]
                         this.subgroups = this.subgroups.concat(data);
                         this.activeGroupID = this.subgroups[0].ID;
 
                         this.viewGroup(this.activeGroupID);
-                    });
-
-                    // let t0 = Date.now()
-                    // this.users_filtered = []
-                    // this.coflows.Get("administration/UsersApp_contacts?groupid=" + this.wid + "&agreements=false", data => {
-                    //     // this.coflows.Get("administration/UsersApp_contacts?groupid=00ab632b-b083-4204-bc82-6b50aa2ffb8d&agreements=false", data => {
-                    //     this.users = data
-                    //     this.users_filtered = this.users.items
-                    //     // console.log(data, (Date.now() - t0) / 1000)
-                    //     this.search = ''
-                        
-                    // });
-                    
-                    
+                    })
                 }
                 else
                     this.addGroupMessage = data.Data
-
-                console.log(data)
-            });
-        // AddPermission(string email, int accessType)
+            })
     }
      
-    activePermissionID = null
+    activePermission = null
     openRemovePermission(content, permission) {
-        // console.log(content, permission)
         this.activeModal = content
-        this.activePermissionID = permission.ID
-        this.modalService.open(content).result.then((result) => {
-            
-
-        }, (reason) => {
-            // console.log(reason)
-            // this.modalService.dismissAll(content)
-        });
-
-        // this.modalMessage = ''
-        
+        this.activePermission = permission
+        this.modalService.open(content).result.then((result) => {}, (reason) => {})
     }
     removePermissionMessage = ''
     removePermission(){
-        let id = this.activePermissionID
-        // console.log(id)
+        let id = this.activePermission.ID
         this.search = 'Reloading permissions...'
                 
-        this.coflows.Get('administration/removepermission?userid=' + id + '&groupid=' + this.wid,
+        this.coflows.Get('administration/removepermission?pid=' + id + '&groupid=' + this.wid,
             data => {
                 let t0 = Date.now()
                 this.users_filtered = []
-                this.coflows.Get("administration/UsersApp_contacts?groupid=" + this.wid + "&agreements=false", data => {
-                    // this.coflows.Get("administration/UsersApp_contacts?groupid=00ab632b-b083-4204-bc82-6b50aa2ffb8d&agreements=false", data => {
+                this.coflows.Get("administration/Users?groupid=" + this.wid, data => {
                     this.users = data
-                    this.users_filtered = this.users.items
-                    // console.log(data, (Date.now() - t0) / 1000)
+                    this.users_filtered = this.users
                     this.search = ''
                     this.modalService.dismissAll(this.activeModal)
-                });
-            });
+                })
+            })
     
+    }
+
+    activeFile = null
+    openRemoveFile(content, item) {
+        this.activeModal = content
+        this.activeFile = item
+        this.modalService.open(content).result.then((result) => {}, (reason) => {})
+        
+    }
+    removeFileMessage = ''
+    
+    removeFile(){
+        this.coflows.Get('administration/removepermission?pid=' + this.activeFile.ID,
+            data => {
+                this.coflows.showMessage('Permission updated')
+
+                this.coflows.GetFile("files/remove?fid=" + this.activeFile.ID, data => {
+                    this.coflows.Get("files/files?groupid=" + this.wid, data => {
+                        this.groupFiles = data
+                        this.modalService.dismissAll(this.activeModal)
+                    })
+                })
+            })
     }
 
     tabBeforeChange(event){
@@ -571,10 +590,6 @@ export class WorkflowComponent {
         if(event == 3){
             
         }
-
-        // if(event == 4){
-
-        // }
     }
 
     //Workbook Sourcecode
@@ -862,10 +877,9 @@ export class WorkflowComponent {
         }
         // console.log(templateCode)
 
-        this.coflows.Post('m/createf',
+        this.coflows.Post('flow/createagent',
             templateCode
             ,
-            //this.coflows.Post('strategy/portfoliolist',[93437],
             data => {
                 console.log(data)
             })
@@ -939,10 +953,9 @@ def pkg():
         }
         // console.log(templateCode)
 
-        this.coflows.Post('m/createf',
+        this.coflows.Post('flow/createagent',
             templateCode
             ,
-            //this.coflows.Post('strategy/portfoliolist',[93437],
             data => {
                 console.log(data)
             })
@@ -1020,10 +1033,9 @@ public class CSharpAgent
         }
         // console.log(templateCode)
 
-        this.coflows.Post('m/createf',
+        this.coflows.Post('flow/createagent',
             templateCode
             ,
-            //this.coflows.Post('strategy/portfoliolist',[93437],
             data => {
                 console.log(data)
             })
@@ -1105,10 +1117,9 @@ public class CSharpAgent
         }
         console.log(templateCode)
 
-        this.coflows.Post('m/createf',
+        this.coflows.Post('flow/createagent',
             templateCode
             ,
-            //this.coflows.Post('strategy/portfoliolist',[93437],
             data => {
                 console.log(data)
             })
@@ -1182,12 +1193,10 @@ let pkg = new qengine.FPKG(
             }]
 
         }
-        // console.log(templateCode)
-
-        this.coflows.Post('m/createf',
+        
+        this.coflows.Post('flow/createagent',
             templateCode
             ,
-            //this.coflows.Post('strategy/portfoliolist',[93437],
             data => {
                 console.log(data)
             })

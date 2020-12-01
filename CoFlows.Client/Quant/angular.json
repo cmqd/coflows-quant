@@ -30,11 +30,9 @@
               "src/assets/fonts/data-table/icons.css",
               "src/assets/styles/app.scss",
               "node_modules/font-awesome/css/font-awesome.min.css",
-              
               "node_modules/primeng/resources/themes/rocket/theme.scss",
               "node_modules/codemirror/addon/fold/foldgutter.css",
               "node_modules/codemirror/lib/codemirror.css",
-              
               "node_modules/primeng/resources/primeng.min.css",
               "node_modules/primeicons/primeicons.css"
             ],
@@ -171,5 +169,8 @@
     "@schematics/angular:directive": {
       "prefix": "app"
     }
+  },
+  "cli": {
+    "analytics": "3a5ccad3-42eb-4e15-a22e-ba20f0737c5b"
   }
 }

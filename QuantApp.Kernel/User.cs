@@ -99,7 +99,11 @@ namespace QuantApp.Kernel
 
         public static UserData ContextUserBySecret(string secret)
         {
-            return FindUserBySecret(secret).ToUserData();
+            var user = FindUserBySecret(secret);
+            if(user != null)
+                return user.ToUserData();
+            else
+                return new QuantApp.Kernel.UserData();
         }
 
         public void SetContextUser()
@@ -109,7 +113,10 @@ namespace QuantApp.Kernel
 
         public static void SetContextUserSecret(string secret)
         {
-            ContextUser = FindUserBySecret(secret).ToUserData();
+            var user = FindUserBySecret(secret);
+            
+            if(user != null)
+                ContextUser = user.ToUserData();
         }
 
         public override string ToString()
@@ -124,6 +131,16 @@ namespace QuantApp.Kernel
             this._id = id;
         }
 
+        public User(string id, string firstName, string lastName, string email, string meta, string secret)
+        {
+            this._id = id;
+            this._firstName = firstName;
+            this._lastName = lastName;
+            this._email = email;
+            this._meta = meta;
+            this._secret = secret;
+        }
+
         public string ID
         {
             get
@@ -136,81 +153,115 @@ namespace QuantApp.Kernel
             }
         }
 
+        private string _firstName = null;
         public string FirstName
         {
             get
             {
+                if(_firstName != null)
+                    return _firstName;
+
                 if (Factory == null)
                     return null;
 
-                return Factory.GetProperty<string>(this, "FirstName");
+                _firstName = Factory.GetProperty<string>(this, "FirstName");
+
+                return _firstName;
             }
             set
             {
+                _firstName = value;
+
                 if (Factory != null)
                     Factory.SetProperty(this, "FirstName", value);
             }
         }
 
+        private string _lastName = null;
         public string LastName
         {
             get
             {
+                if(_lastName != null)
+                    return _lastName;
+
                 if (Factory == null)
                     return null;
 
-                return Factory.GetProperty<string>(this, "LastName");
+                _lastName = Factory.GetProperty<string>(this, "LastName");
+
+                return _lastName;
             }
             set
             {
+                _lastName = value;
                 if (Factory != null)
                     Factory.SetProperty(this, "LastName", value);
             }
         }
 
+        private string _email = null;
         public string Email
         {
             get
             {
+                if(_email != null)
+                    return _email;
+
                 if (Factory == null)
                     return null;
 
-                return Factory.GetProperty<string>(this, "Email");
+                _email = Factory.GetProperty<string>(this, "Email");
+                return _email;
             }
             set
             {
+                _email = value;
                 if (Factory != null)
                     Factory.SetProperty(this, "Email", value);
             }
         }
 
+        private string _secret = null;
         public string Secret
         {
             get
             {
+                if(_secret != null)
+                    return _secret;
+
                 if (Factory == null)
                     return null;
 
-                return Factory.GetProperty<string>(this, "Secret");
+                _secret = Factory.GetProperty<string>(this, "Secret");
+                return _secret;
             }
             set
             {
+                _secret = value;
                 if (Factory != null)
                     Factory.SetProperty(this, "Secret", value);
             }
         }
 
+        private string _meta = null;
         public string MetaData
         {
             get
             {
+                if(_meta != null)
+                    return _meta;
+
                 if (Factory == null)
                     return null;
 
-                return Factory.GetProperty<string>(this, "MetaData");
+                _meta = Factory.GetProperty<string>(this, "MetaData");
+                return _meta;
             }
             set
             {
+                _meta = value;
+
                 if (Factory != null)
                     Factory.SetProperty(this, "MetaData", value);
             }
@@ -406,6 +457,10 @@ namespace QuantApp.Kernel
 
         public static User FindUserBySecret(string key)
         {
+            var user = FindBySecretCustom(key);
+            if(user != null)
+                return user;
+
             if (Factory == null)
                 return null;
 
@@ -447,6 +502,16 @@ namespace QuantApp.Kernel
         public static bool operator !=(User x, User y)
         {
             return !(x == y);
+        }
+
+        public delegate User FindBySecretEvent(string key);
+        public static FindBySecretEvent FindBySecretFunction = null;
+
+        public static User FindBySecretCustom(string key)
+        {
+            if (FindBySecretFunction != null)
+                return FindBySecretFunction(key);
+            return null;
         }
     }
 }

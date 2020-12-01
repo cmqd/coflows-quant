@@ -72,9 +72,13 @@ namespace CoFlows.Server.Realtime
 
                 QuantApp.Kernel.User quser = null;
 
+                string cokey = context.Request.Cookies["coflows"]; 
+                if(cokey == null && context.Request.Query.ContainsKey("_session"))
+                    cokey = context.Request.Query["_session"];
+
                 if(!context.User.Identity.IsAuthenticated)
                 {
-                    string cokey = context.Request.Cookies["coflows"]; 
+                    
                     if(cokey != null)
                     {
                         if(CoFlows.Server.Controllers.AccountController.sessionKeys.ContainsKey(cokey))
@@ -84,7 +88,7 @@ namespace CoFlows.Server.Realtime
                             {
                                 await _next.Invoke(context);
                                 return;
-                            }                    
+                            }         
                         }
                         else
                         {
@@ -123,13 +127,17 @@ namespace CoFlows.Server.Realtime
                 var id = _socketManager.AddSocket(socket);
                 var address = context.Connection.RemoteIpAddress;
 
+                
+
                 if(path.StartsWith("/lab/"))
                 {
                     var wid = path.Replace("/lab/", "");
                     wid = wid.Substring(0, wid.IndexOf("/"));
 
+                    int labPort = CoFlows.Server.Controllers.LabController.LabDB[cokey + wid];
+
                     var client = ProxyConnection.Client(socket,  path);
-                    client.Connect("ws://localhost:8888", headers);
+                    client.Connect("ws://localhost:" + labPort, headers);
 
                     var _socket = client.ClientWebSocket;
                     _proxies.TryAdd(socket.GetHashCode() + path, client);
@@ -718,11 +726,45 @@ namespace CoFlows.Server.Realtime
 
         public void Send(IEnumerable<string> to, string from, string subject, string message)
         {
+            try
+            {
+                var mailMsg = new System.Net.Mail.MailMessage();
+
+                //// To
+                foreach(var pairs in to)
+                {
+                    var pair = pairs.Split(';');
+                    var email = pair[0];
+                    var name = pair[1];
+                    mailMsg.To.Add(new System.Net.Mail.MailAddress(email, name));
+                }
+
+                //// From
+                var pairFrom = from.Split(';');
+                var emailFrom = pairFrom[0];
+                var nameFrom = pairFrom[1];
+                mailMsg.From = new System.Net.Mail.MailAddress(emailFrom, nameFrom);
+
+                mailMsg.Subject = subject;
+                mailMsg.AlternateViews.Add(System.Net.Mail.AlternateView.CreateAlternateViewFromString(message, null, System.Net.Mime.MediaTypeNames.Text.Plain));
+                mailMsg.AlternateViews.Add(System.Net.Mail.AlternateView.CreateAlternateViewFromString(message.Replace(System.Environment.NewLine, "<br>"), null, System.Net.Mime.MediaTypeNames.Text.Html));
+
+                //// Init SmtpClient and send
+                var smtpClient = new System.Net.Mail.SmtpClient("smtp.sendgrid.net", Convert.ToInt32(587));
+                var credentials = new System.Net.NetworkCredential("aqi", "Capital!1234");
+                smtpClient.Credentials = credentials;
+
+                smtpClient.Send(mailMsg);
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e);
+            }
         }
     }
 
 
-    public class ProxyConnection : QuantApp.Core.Connection
+    public class ProxyConnection : CoFlows.Core.Connection
     {
         private static ConcurrentDictionary<string, ProxyConnection> registered_sockets = new ConcurrentDictionary<string, ProxyConnection>();
 

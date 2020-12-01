@@ -8,6 +8,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 
 using System.Data;
@@ -205,6 +206,8 @@ namespace QuantApp.Kernel.Adapters.SQL
                     SqlDataAdapter adapter = new SqlDataAdapter();
                     adapter.SelectCommand = new SqlCommand(command, _connectionInternal);
                     adapter.SelectCommand.CommandTimeout = 0 * 60 * 15;
+
+                    adapter.MissingSchemaAction = MissingSchemaAction.AddWithKey;
 
                     adapter.Fill(dataset, table);
                 }
@@ -533,6 +536,28 @@ namespace QuantApp.Kernel.Adapters.SQL
             }
         }
 
+        // public void ExecuteCommand(string command)
+        // {
+        //     lock (objLock)
+        //     {
+        //         if (string.IsNullOrWhiteSpace(command))
+        //             return;
+
+        //         using (SqlConnection _connectionInternal = new SqlConnection(ConnectString))
+        //         {
+        //             _connectionInternal.Open();
+        //             SqlCommand com = new SqlCommand(command);
+        //             com.CommandTimeout = 0 * 60 * 15;
+        //             com.Connection = _connectionInternal;
+                    
+        //             com.ExecuteNonQuery();
+
+        //             _connectionInternal.Close();
+                
+        //         }
+        //     }
+        // }
+
         public void ExecuteCommand(string command)
         {
             lock (objLock)
@@ -543,16 +568,85 @@ namespace QuantApp.Kernel.Adapters.SQL
                 using (SqlConnection _connectionInternal = new SqlConnection(ConnectString))
                 {
                     _connectionInternal.Open();
-                    SqlCommand com = new SqlCommand(command);
-                    com.CommandTimeout = 0 * 60 * 15;
-                    com.Connection = _connectionInternal;
-                    
-                    com.ExecuteNonQuery();
+                    var transaction = _connectionInternal.BeginTransaction();
+                    var commands = command.Split(';');
+                    foreach(var _com in commands)
+                    {
+                        if(!string.IsNullOrEmpty(_com))
+                        {
+                            try
+                            {
+                                // SqlConnection com = new SqlConnection(_com, _connectionInternal, transaction);
+                                // NpgsqlCommand com = new NpgsqlCommand(_com);
+                                // com.CommandTimeout = 0 * 60 * 15;
+                                // com.Connection = _connectionInternal;
+                                // com.ExecuteNonQuery();
+                                
+                                // SqlCommand _command = _connectionInternal.CreateCommand();
+                                // _command.Transaction = transaction;
+                                // _command.CommandText = _com;
 
+                                SqlCommand _command = new SqlCommand(_com, _connectionInternal, transaction);
+                                _command.ExecuteNonQuery();
+                            }
+                            catch(Exception e)
+                            {
+                                Console.WriteLine("ERROR: " + _com);
+                                Console.WriteLine(e);
+                                // throw e;
+                            }
+                        }
+                    }
+                    transaction.Commit();
                     _connectionInternal.Close();
-                
                 }
             }
+        }
+
+        public void CreateDB(string connectionString, List<Tuple<string, string>> schemas)
+        {
+            // var connString = connectionString.Substring(0, connectionString.IndexOf("Database=") - 1);
+            // var dbName = connectionString.Substring(connectionString.IndexOf("Database="));
+            // dbName = dbName.Substring(dbName.IndexOf("=") + 1);
+            var dbName = "";
+
+            var cons = connectionString.Split(';');
+            foreach(var f in cons)
+                if(f.ToLower().StartsWith("server="))
+                    dbName = f.ToLower().Replace("server=", "");
+            
+            var connString = connectionString;
+
+            Console.WriteLine("MSSql database: " + dbName);
+
+            try
+            {
+                var conn = new SqlConnection(connString);
+                conn.Open();
+                
+                using (var cmd = new SqlCommand("SELECT 1 FROM sys.Tables WHERE NAME='M' AND Type = 'U'", conn))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if(reader.Read())
+                        return;
+                }
+            }
+            catch{}
+
+            Console.WriteLine("Checking Schema: " + dbName);
+            foreach(var schema in schemas)
+                try
+                {                    
+                    Console.WriteLine("Start running: " + schema.Item1);
+                    ExecuteCommand(schema.Item2);
+                    Console.WriteLine("Done running: " + schema.Item1);
+                }
+                catch(Exception e)
+                {
+                    Console.WriteLine(e);
+                }
+
+            Console.WriteLine("Processed DB: " + dbName);
         }
 
         public DbDataReader ExecuteReader(string command)

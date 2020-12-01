@@ -1,10 +1,10 @@
-import { Component, ViewChild, Injectable } from '@angular/core';
+import { Component, Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 
 import { Router, CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot } from '@angular/router';
 
-import { Observable, interval } from "rxjs"
-import { delay, takeWhile } from "rxjs/operators"
+import { interval } from "rxjs"
+import { takeWhile } from "rxjs/operators"
 
 
 import { MessagingService } from './messaging.service';
@@ -30,7 +30,7 @@ export class CoFlowsComponent implements  CanActivate  {
                 
         this.coflows_server = (msService.secure ? 'https' : 'http') + '://' + msService.server + '/'
 
-        this.msService.subscribe(msg => {this.ProcessMessage(msg);})
+        // this.msService.subscribe(msg => this.ProcessMessage(msg))
 
         let storedToken = localStorage.getItem('CoFlows-CoFlowsJWT')
         // console.log('TOKEN LOAD: ' + storedToken)
@@ -42,11 +42,11 @@ export class CoFlowsComponent implements  CanActivate  {
 
         // console.log('Header Load:', this.header, storedToken)
         
-        this.msService.onClose(event => {
-            console.log('connection closed')
-            // this.checkLogin(this.router.url)
-            this.logout(true)
-        });
+        // this.msService.onClose(event => {
+        //     console.log('connection closed', event, this.msService)
+        //     // this.checkLogin(this.router.url)
+        //     this.logout(true)
+        // });
         
         interval(10000)
         .pipe(takeWhile(i => (this.quser != null && this.quser.User.Loggedin)))
@@ -98,17 +98,19 @@ export class CoFlowsComponent implements  CanActivate  {
         let waiting = false
         let iid = setInterval(x => {
             try{
-                // console.log('checking user')
                 if(!(this.quser != null && this.quser.User.Loggedin) && this.header != null && !waiting){
                     waiting = true
-                    // console.log('CHECK USER', this.header)
                     this.http.get(this.coflows_server + 'account/whoami', { headers: this.header })
                     .toPromise().then(response => {  
-                        // console.log(this.quser, this.header, response)
                         this.quser = response
                         waiting = false
 
-                        func()
+                        this.msService.subscribe(msg => this.ProcessMessage(msg), this.quser.User.Session, func)
+                        this.msService.onClose(event => {
+                            console.log('connection closed', event, this.msService)
+                            this.logout(true)
+                        })
+
                         clearInterval(iid)
                         return
 
@@ -133,7 +135,7 @@ export class CoFlowsComponent implements  CanActivate  {
     checkLogin(url : string): void {
         // console.log('check user', this.header)
         this.checking = true
-        if(this.router.url == '/authentication/signup'){
+        if(this.router.url == '/authentication/signup' || this.router.url == '/authentication/forgot'){
             // console.log(this.quser)
             this.checking = false
             return
@@ -158,10 +160,16 @@ export class CoFlowsComponent implements  CanActivate  {
                     // console.log('login user', this.quser, this.header)
                     
                     if(this.quser != null && this.quser.User.Loggedin){
-                        if(this.msService.reOpen()){                
+                        // if(this.msService.reOpen()){                
                             // location.rseload();
-                            this.msService.subscribe(msg => {this.ProcessMessage(msg);});
-                        }
+                            // this.msService.subscribe(msg => {this.ProcessMessage(msg);});
+                            this.msService.subscribe(msg => this.ProcessMessage(msg), this.quser.User.Session, x => {})
+                            this.msService.onClose(event => {
+                                console.log('connection closed', event, this.msService)
+                                // this.checkLogin(this.router.url)
+                                this.logout(true)
+                            })
+                        // }
 
                         if(url == '/authentication/signin' || url == null)
                             url = '/'
@@ -215,6 +223,8 @@ export class CoFlowsComponent implements  CanActivate  {
 
     oauth(token: string, url: string){
         if(!(token == null || token == "null" || token == "")){
+
+            // console.log('--- SAVE token', token)
             // Read the result field from the JSON response.
             this.header = new HttpHeaders().set('Authorization', `Bearer ` + token);
             
@@ -222,13 +232,23 @@ export class CoFlowsComponent implements  CanActivate  {
             
             this.http.get(this.coflows_server + 'account/whoami', { headers: this.header })
                 .toPromise().then(response => {  
-                    // console.log(response)
-                    this.quser = response;
+                    
+                    this.quser = response
+
+                    // console.log(' -- OAUTH ', this.quser.User)
 
                     if(url == '/authentication/signin' || url == null || url == 'null')
                         url = '/'
 
                     localStorage.setItem('CoFlowsURL', null);
+
+                    this.msService.subscribe(msg => this.ProcessMessage(msg), this.quser.User.Session, x => {})
+                    this.msService.onClose(event => {
+                        console.log('connection closed', event, this.msService)
+                        // this.checkLogin(this.router.url)
+                        this.logout(true)
+                    })
+
                     this.router.navigate ( [ url ] );
                 });
 
@@ -252,9 +272,10 @@ export class CoFlowsComponent implements  CanActivate  {
                 let token = data.token                
                 if(!(token == null || token == "null" || token == "")){
                     // Read the result field from the JSON response.
-                    this.header = new HttpHeaders().set('Authorization', `Bearer ` + token);
+                    this.header = new HttpHeaders().set('Authorization', `Bearer ` + token)
                     
-                    localStorage.setItem('CoFlows-CoFlowsJWT', token);
+                    localStorage.setItem('CoFlows-CoFlowsJWT', token)
+
                     
                     this.http.get(this.coflows_server + 'account/whoami', { headers: this.header })
                         .toPromise().then(response => {  
@@ -264,6 +285,14 @@ export class CoFlowsComponent implements  CanActivate  {
                                 url = '/'
 
                             localStorage.setItem('CoFlowsURL', null);
+
+                            this.msService.subscribe(msg => this.ProcessMessage(msg), this.quser.User.Session, x => {})
+                            this.msService.onClose(event => {
+                                console.log('connection closed', event, this.msService)
+                                // this.checkLogin(this.router.url)
+                                this.logout(true)
+                            })
+
                             this.router.navigate ( [ url ] );
                         });
 
@@ -302,13 +331,13 @@ export class CoFlowsComponent implements  CanActivate  {
                 this.router.navigate ( [ '/authentication/signin' ] )
                 location.reload()
             }
-        });
+        }).catch(err => {});
 
     } 
 
     changePassword(oldPassword: string, newPassword: string, success, fail): void {
         // console.log(this.quser)
-        this.Get('administration/updatepassword_app?userid=' + this.quser.User.ID + '&old_password=' + oldPassword + '&new_password=' + newPassword,
+        this.Post('administration/updatepassword',{ UserID:this.quser.User.ID, OldPassword: oldPassword, NewPassword: newPassword  },
         data => {
             if(data.Data == "ok"){
                 success()
@@ -337,7 +366,6 @@ export class CoFlowsComponent implements  CanActivate  {
             Type: 1,
             Content: id
         };
-        // console.log('subscribe: ' + id)
         this.msService.send(mess);
     };
 
@@ -412,7 +440,6 @@ export class CoFlowsComponent implements  CanActivate  {
 
     ProcessMessage(event): void {
         var message = event;//JSON.parse(message_str);
-        
 
         var content = message.Content;
         var counter = message.Counter;
@@ -592,7 +619,7 @@ export class CoFlowsComponent implements  CanActivate  {
                 }
                 catch (err) { }
 
-                // console.log(message, data, obj)
+                //console.log(message, data, obj)
                 
 
                 obj = { Key: message.ID, Value: obj }
@@ -637,7 +664,7 @@ export class CoFlowsComponent implements  CanActivate  {
         
         
             var key = "--" + type + "-" + scope.User.ID;
-            this.http.get(this.coflows_server + '/CoFlows/GetUserData?groupid=' + scope.Group.ID + '&type=' + type, { headers: this.header })
+            this.http.get(this.coflows_server + 'account/userdata?groupid=' + scope.Group.ID + '&type=' + type, { headers: this.header })
             .toPromise().then(function(resp){
                 
                 if (this.UserData.containsKey(key)) {
@@ -673,7 +700,6 @@ export class CoFlowsComponent implements  CanActivate  {
                         return {Key: x.EntryID, Value: obj }
                     })
 
-                    //console.log(resp)
                     if (this.UserData.has(key)) {
                         this.UserData.get(key).Value = resp;
                     }
@@ -703,27 +729,44 @@ export class CoFlowsComponent implements  CanActivate  {
         })
     }
     
-    Post(url : string, data : any, func : any): void {     
+    Post(url : string, data : any, func : any, err?: any): void {     
         this.CheckUser(() => {
             this.http.post(this.coflows_server + url, data, { headers: this.header })
             .toPromise().then(response => {  
                 func(response);
             })
+            .catch(error =>  {if(err != undefined) err(error) } )
         })
     }
 
-    PostAnonymous(url : string, data : any, func : any): void {     
+    PostAnonymous(url : string, data : any, func : any, err?: any): void {     
         this.http.post(this.coflows_server + url, data, { headers: this.header })
         .toPromise().then(response => {  
             func(response);
         })
+        .catch(error =>  {if(err != undefined) err(error) } )
     }
 
-    Get(url : string, func : any): void {        
+    Get(url : string, func : any, err?: any): void {        
         this.CheckUser(() => {
-            // console.log(this.header)
             this.http.get(this.coflows_server + url, { headers: this.header })
             .toPromise().then(response => {  
+                func(response);
+            })
+            .catch(error =>  {if(err != undefined) err(error) } )
+        })
+    }
+
+    GetFile(url : string, func : any): void {        
+        this.CheckUser(() => {                    
+            this.http.get(
+                this.coflows_server + url, 
+                { 
+                    headers: this.header,
+                    responseType: 'blob'
+                }
+            )
+            .subscribe(response => {  
                 func(response);
             })
         })
